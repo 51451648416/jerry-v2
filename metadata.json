@@ -1,0 +1,6 @@
+{
+  "name": "國道5號雪山隧道即時車流分析與CCTV監控系統",
+  "description": "國道5號全線 0K~54K 走廊即時路況監控、雪山隧道雙向 20 微元空間積分流速推估、數理模型原理分析、最佳出發時間推薦與後台管理系統",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
