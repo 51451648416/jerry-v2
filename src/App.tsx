@@ -36,7 +36,24 @@ import { runVdTrafficEstimator } from "./estimator/trafficEngine";
 import { captureDetectionToDataset } from "./services/datasetRepository";
 import { isAdminAuthenticated, subscribeAdminAuth } from "./services/adminAuth";
 
-const API_COOLDOWN_SECONDS = 130;
+const API_COOLDOWN_SECONDS = 80;
+const STORAGE_LAST_FETCH_TIME_KEY = "hsuehshan_traffic_last_fetch_timestamp";
+const STORAGE_LAST_OUTPUT_KEY = "hsuehshan_traffic_cached_output";
+const STORAGE_HAS_STARTED_KEY = "hsuehshan_traffic_started_state";
+
+const computeRemainingCooldown = (): number => {
+  try {
+    const lastFetchStr = localStorage.getItem(STORAGE_LAST_FETCH_TIME_KEY);
+    if (!lastFetchStr) return 0;
+    const lastFetchTime = parseInt(lastFetchStr, 10);
+    if (isNaN(lastFetchTime)) return 0;
+    const elapsedSeconds = (Date.now() - lastFetchTime) / 1000;
+    const remaining = Math.ceil(API_COOLDOWN_SECONDS - elapsedSeconds);
+    return remaining > 0 ? remaining : 0;
+  } catch {
+    return 0;
+  }
+};
 
 export default function App() {
   // Top 5 Tabs: 'lane' | 'corridor' | 'departure' | 'dataset' | 'cctv'
@@ -62,6 +79,54 @@ export default function App() {
 
   // Global Keyword Search Modal State
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+
+  // Persistent 80s Cooldown State: Computed directly from hardware localStorage timestamp
+  const [cooldown, setCooldown] = useState<number>(() => computeRemainingCooldown());
+  const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Restore analysis state & cached output from localStorage on initial mount
+  useEffect(() => {
+    try {
+      const cachedStarted = localStorage.getItem(STORAGE_HAS_STARTED_KEY);
+      const cachedOutput = localStorage.getItem(STORAGE_LAST_OUTPUT_KEY);
+      if (cachedStarted === "true") {
+        setHasStartedAnalysis(true);
+        setAnalysisProgress(100);
+      }
+      if (cachedOutput && !estimatorOutput) {
+        const parsed = JSON.parse(cachedOutput);
+        setEstimatorOutput(parsed);
+      }
+    } catch (err) {
+      console.warn("Could not parse cached traffic state", err);
+    }
+  }, []);
+
+  // Cooldown countdown timer loop (strictly synchronized with hardware clock)
+  useEffect(() => {
+    const updateCountdown = () => {
+      const remaining = computeRemainingCooldown();
+      setCooldown(remaining);
+      if (remaining <= 0 && cooldownTimerRef.current) {
+        clearInterval(cooldownTimerRef.current);
+        cooldownTimerRef.current = null;
+      }
+    };
+
+    updateCountdown();
+
+    if (cooldown > 0) {
+      if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
+      cooldownTimerRef.current = setInterval(updateCountdown, 1000);
+    }
+
+    return () => {
+      if (cooldownTimerRef.current) {
+        clearInterval(cooldownTimerRef.current);
+        cooldownTimerRef.current = null;
+      }
+    };
+  }, [cooldown > 0]);
 
   // 全域快捷鍵 ⌘K / Ctrl+K 開啟搜尋
   useEffect(() => {
@@ -139,38 +204,18 @@ export default function App() {
     }
   };
 
-  // Rate Limiting Cooldown: Starts at 130s per API call, decrements 1/sec
-  const [cooldown, setCooldown] = useState<number>(0);
-  const cooldownTimerRef = useRef<NodeJS.Timeout | null>(null);
-
   const showToast = (message: string, type: "emerald" | "rose" | "amber" = "emerald") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4500);
   };
 
-  // Cooldown countdown timer loop
-  useEffect(() => {
-    if (cooldown <= 0) return;
-
-    cooldownTimerRef.current = setInterval(() => {
-      setCooldown((prev) => {
-        if (prev <= 1) {
-          if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => {
-      if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
-    };
-  }, [cooldown]);
-
   // Fetch Live TDX VD Data and Run Traffic State Estimation
-  const fetchTdxAndEstimate = async (targetDir: Direction = direction, forceOverrideCooldown: boolean = false) => {
-    if (cooldown > 0 && !forceOverrideCooldown) {
-      showToast(`請等待冷卻倒數完成 (${cooldown} 秒後可再次更新)`, "amber");
+  // Strictly enforces hardware-persisted 80-second rate limiting per device
+  const fetchTdxAndEstimate = async (targetDir: Direction = direction) => {
+    const currentRemainingCooldown = computeRemainingCooldown();
+    if (currentRemainingCooldown > 0) {
+      setCooldown(currentRemainingCooldown);
+      showToast(`本機設備冷卻限制中：請等待 ${currentRemainingCooldown} 秒後方可再次更新分析`, "amber");
       return;
     }
 
@@ -181,7 +226,12 @@ export default function App() {
     setHasStartedAnalysis(true);
     setAnalysisProgress(100);
 
-    // Set cooldown variable to 130 seconds
+    // Persist timestamp immediately to prevent page reload bypass
+    const fetchTimestampMs = Date.now();
+    try {
+      localStorage.setItem(STORAGE_LAST_FETCH_TIME_KEY, fetchTimestampMs.toString());
+      localStorage.setItem(STORAGE_HAS_STARTED_KEY, "true");
+    } catch {}
     setCooldown(API_COOLDOWN_SECONDS);
 
     try {
@@ -240,6 +290,9 @@ export default function App() {
       const { totalCount } = captureDetectionToDataset(output, targetDir);
 
       setEstimatorOutput(output);
+      try {
+        localStorage.setItem(STORAGE_LAST_OUTPUT_KEY, JSON.stringify(output));
+      } catch {}
       setTdxError(null);
       showToast(`已成功同步 TDX 官方數據並自動收錄至資料集 (目前累計 ${totalCount} 筆)`, "emerald");
     } catch (err: any) {
@@ -271,7 +324,7 @@ export default function App() {
       captureDetectionToDataset(recomputed, newDir);
       setEstimatorOutput(recomputed);
     } else if (hasStartedAnalysis && cooldown === 0) {
-      fetchTdxAndEstimate(newDir, false);
+      fetchTdxAndEstimate(newDir);
     }
   };
 
@@ -311,7 +364,7 @@ export default function App() {
         onOpenAdminSettings={handleOpenAdminSettings}
         direction={direction}
         onDirectionChange={handleDirectionChange}
-        onRefresh={() => fetchTdxAndEstimate(direction, false)}
+        onRefresh={() => fetchTdxAndEstimate(direction)}
         isLoading={isLoading}
         cooldown={cooldown}
         onOpenSearch={() => setIsSearchOpen(true)}
@@ -343,7 +396,7 @@ export default function App() {
               <TunnelEntranceCover
                 direction={direction}
                 estimatorOutput={estimatorOutput}
-                onStartAnalysis={() => fetchTdxAndEstimate(direction, true)}
+                onStartAnalysis={() => fetchTdxAndEstimate(direction)}
                 isLoading={isLoading}
               />
             ) : (
@@ -358,7 +411,7 @@ export default function App() {
                   </div>
                   <button
                     disabled={isLoading || cooldown > 0}
-                    onClick={() => fetchTdxAndEstimate(direction, false)}
+                    onClick={() => fetchTdxAndEstimate(direction)}
                     className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition ${
                       isLoading
                         ? "bg-slate-100 text-slate-400 cursor-not-allowed"
@@ -383,7 +436,7 @@ export default function App() {
                   direction={direction}
                   estimatorOutput={estimatorOutput}
                   onDirectionChange={(newDir) => handleDirectionChange(newDir)}
-                  onRefresh={() => fetchTdxAndEstimate(direction, false)}
+                  onRefresh={() => fetchTdxAndEstimate(direction)}
                   isLoading={isLoading}
                 />
               </div>
@@ -425,11 +478,22 @@ export default function App() {
 
                 <div className="pt-1">
                   <button
-                    onClick={() => fetchTdxAndEstimate(direction, true)}
-                    className="w-full sm:w-auto px-8 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-2xl shadow-lg shadow-emerald-600/20 text-sm transition cursor-pointer flex items-center justify-center gap-2.5 mx-auto"
+                    disabled={isLoading || cooldown > 0}
+                    onClick={() => fetchTdxAndEstimate(direction)}
+                    className={`w-full sm:w-auto px-8 py-3.5 font-extrabold rounded-2xl shadow-lg text-sm transition flex items-center justify-center gap-2.5 mx-auto ${
+                      isLoading || cooldown > 0
+                        ? "bg-slate-200 text-slate-500 border border-slate-300 cursor-not-allowed shadow-none font-mono"
+                        : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20 cursor-pointer"
+                    }`}
                   >
                     <Activity className="h-5 w-5" />
-                    <span>啟動即時 GIS 地圖與車道分析 (變數變更為 100%)</span>
+                    <span>
+                      {isLoading
+                        ? "分析計算中..."
+                        : cooldown > 0
+                        ? `本機設備冷卻中（${cooldown} 秒後可再次更新）`
+                        : "啟動即時 GIS 地圖與車道分析 (變數變更為 100%)"}
+                    </span>
                   </button>
                 </div>
               </div>
@@ -470,8 +534,8 @@ export default function App() {
             estimatorOutput={estimatorOutput}
             direction={direction}
             onDirectionChange={handleDirectionChange}
-            onStartAnalysis={() => fetchTdxAndEstimate(direction, true)}
-            onRefresh={() => fetchTdxAndEstimate(direction, false)}
+            onStartAnalysis={() => fetchTdxAndEstimate(direction)}
+            onRefresh={() => fetchTdxAndEstimate(direction)}
             isLoading={isLoading}
             cooldown={cooldown}
             onSelectRouteForDeparture={(originKm, destKm) => {
@@ -486,8 +550,8 @@ export default function App() {
             estimatorOutput={estimatorOutput}
             direction={direction}
             onDirectionChange={handleDirectionChange}
-            onStartAnalysis={() => fetchTdxAndEstimate(direction, true)}
-            onRefresh={() => fetchTdxAndEstimate(direction, false)}
+            onStartAnalysis={() => fetchTdxAndEstimate(direction)}
+            onRefresh={() => fetchTdxAndEstimate(direction)}
             isLoading={isLoading}
             cooldown={cooldown}
           />
@@ -504,7 +568,7 @@ export default function App() {
         {/* 備用 / 資料庫管理 (已整併至後台管理系統) */}
         {activeTab === "dataset" && (
           <DatasetRepositoryView
-            onRefresh={() => fetchTdxAndEstimate(direction, false)}
+            onRefresh={() => fetchTdxAndEstimate(direction)}
             onRequireAuthPrompt={handleRequireAuthPrompt}
           />
         )}
