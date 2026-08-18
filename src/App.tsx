@@ -28,6 +28,7 @@ import TheoryAndPrinciplesView from "./components/TheoryAndPrinciplesView";
 import BackendAuthModal from "./components/BackendAuthModal";
 import AdminAdvancedSettingsModal from "./components/AdminAdvancedSettingsModal";
 import GlobalSearchModal, { SearchResultItem } from "./components/GlobalSearchModal";
+import { Analytics } from "@vercel/analytics/react";
 import { getResolvedApiUrl, getResolvedApiHeaders } from "./services/apiConfig";
 import { fetchDirectFreewayVd } from "./services/tdxDirectClient";
 
@@ -618,7 +619,9 @@ export default function App() {
         onSelectResult={handleSelectSearchResult}
         currentDirection={direction}
       />
+
+      {/* Vercel Web Analytics */}
+      <Analytics />
     </div>
   );
 }
-
