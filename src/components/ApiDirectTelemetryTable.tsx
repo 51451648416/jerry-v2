@@ -74,12 +74,12 @@ export default function ApiDirectTelemetryTable({
             {isExtremeSituation ? (
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black bg-rose-600 text-white shadow-xs animate-bounce">
                 <AlertTriangle className="h-3.5 w-3.5" />
-                <span>極端情況確認 (速差仍 &gt; 20 km/h)</span>
+                <span>極端情況確認 (重算速差仍 &gt; 23 km/h，直接展示 API 原始數據)</span>
               </span>
             ) : triggered ? (
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-600 text-white">
                 <Activity className="h-3.5 w-3.5" />
-                <span>二次驗證完成 (重算收斂 ≤ 20 km/h)</span>
+                <span>二次驗證完成 (重算收斂 ≤ 23 km/h)</span>
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
@@ -137,7 +137,7 @@ export default function ApiDirectTelemetryTable({
           <div className="p-3 rounded-2xl bg-slate-100/80 border border-slate-200 space-y-1">
             <div className="text-[11px] font-medium text-slate-500 flex items-center justify-between">
               <span>二次重算後速差 (Recalculated Δv)</span>
-              <span className="font-mono text-[10px] text-slate-400">極端門檻: 20 km/h</span>
+              <span className="font-mono text-[10px] text-slate-400">極端門檻: 23 km/h</span>
             </div>
             <div className="flex items-baseline gap-2">
               <span
@@ -149,8 +149,8 @@ export default function ApiDirectTelemetryTable({
               </span>
               <span className="text-[11px] text-slate-500">
                 {recalculatedLaneDiffKmh > recalculatedThresholdKmh
-                  ? "🚨 仍 > 20 km/h (判定為極端情況)"
-                  : "✓ 收斂 ≤ 20 km/h (非極端)"}
+                  ? "🚨 仍 > 23 km/h (直接顯示 / 極端情況)"
+                  : "✓ 收斂 ≤ 23 km/h (非極端)"}
               </span>
             </div>
           </div>
@@ -230,7 +230,7 @@ export default function ApiDirectTelemetryTable({
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
                   {filteredVd.map((vd) => {
-                    const isExtremeSpot = vd.speedDeltaKmh > 20.0;
+                    const isExtremeSpot = vd.speedDeltaKmh > 23.0;
                     return (
                       <tr
                         key={vd.detectorId}

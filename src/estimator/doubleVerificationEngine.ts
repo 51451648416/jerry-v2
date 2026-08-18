@@ -7,8 +7,7 @@
  * 2. 若原本方法失敗 (計算例外/數值無效)，自動採用替代方法 (Alternative Robust Fallback Method).
  * 3. 極端情況二次驗證機制：若初算兩車道速差 > 23 km/h，自動觸發二次重算 (Double Verification Trigger: Δv > 23 km/h).
  * 4. 執行二次獨立空間插值與離群抑制重算 (Re-calculate).
- * 5. 若重算後兩車道速差仍 > 20 km/h (Recalculated Δv > 20 km/h)，正式判定為「極端異常情況 (Extreme Situation Determined)」.
- * 6. 直接展示 API 傳輸數據 (Directly Display API Transmission Telemetry Data) 以供比對核實.
+ * 5. 若重算後兩車道速差仍 > 23 km/h (Recalculated Δv > 23 km/h)，直接顯示結果並直接展示 API 原始傳輸數據 (Directly Display API Transmission Telemetry Data) 以供比對核實.
  */
 
 import {
@@ -26,7 +25,7 @@ import {
 } from "./delayAwareEngine";
 
 export const EXTREME_TRIGGER_THRESHOLD_KMH = 23.0; // 兩車道速差超過 23 km/h 觸發二次重算
-export const EXTREME_DETERMINED_THRESHOLD_KMH = 20.0; // 重算後速差仍超過 20 km/h 判定為極端情況
+export const EXTREME_DETERMINED_THRESHOLD_KMH = 23.0; // 重算後速差仍超過 23 km/h 判定為極端情況，直接顯示並展示 API 原始數據
 
 /**
  * 備援替代演算法 (Alternative Robust Method):
@@ -138,7 +137,7 @@ export function computeAlternativeRobustTrajectory(
  * 規則：
  * 1. 初算兩車道速差 > 23 km/h 時觸發二次驗證。
  * 2. 使用二次多重空間插值與離群雜訊抑制法進行獨立重算。
- * 3. 若重算後兩車道速差仍 > 20 km/h，正式判定為「極端情況 (Extreme Situation)」。
+ * 3. 若重算後兩車道速差仍 > 23 km/h，直接顯示結果並判定為「極端情況 (Extreme Situation)」。
  * 4. 直接編譯並輸出 API 傳輸原始數據 (Direct API Transmission Telemetry)。
  */
 export function executeDoubleVerificationAndRecalculation(
@@ -203,26 +202,34 @@ export function executeDoubleVerificationAndRecalculation(
   let isExtremeSituation = false;
   let statusText = "";
   let extremeExplanation = "";
+  let recalculatedTrajectories: DoubleVerificationState["recalculatedTrajectories"] | undefined = undefined;
 
   if (triggered) {
     // 執行二次獨立重算演算法 (Secondary Independent Re-calculation with Outlier Suppression)
     // 採用穩健調和微元重算 (Robust Harmonic Slicing Recalculation)
     const reLane1 = computeAlternativeRobustTrajectory(detectors, direction, 0);
     const reLane2 = computeAlternativeRobustTrajectory(detectors, direction, 1);
+    const reRoad = computeAlternativeRobustTrajectory(detectors, direction, -1);
+
+    recalculatedTrajectories = {
+      lane1: reLane1,
+      lane2: reLane2,
+      road: reRoad,
+    };
 
     const reLane1Speed = reLane1.equivalentTravelSpeedKmh;
     const reLane2Speed = reLane2.equivalentTravelSpeedKmh;
     recalculatedLaneDiffKmh = Math.abs(reLane1Speed - reLane2Speed);
 
-    // 判定：若重算後結果仍 > 20 km/h，正式判定為極端情況
+    // 判定：若重算後結果仍 > 23 km/h，正式判定為極端情況，直接顯示並展示 API 原始數據
     if (recalculatedLaneDiffKmh > EXTREME_DETERMINED_THRESHOLD_KMH) {
       isExtremeSituation = true;
-      statusText = `極端情況確認：初算兩車道速差 ${initialLaneDiffKmh.toFixed(1)} km/h（超過 23 km/h 觸發門檻），經二次獨立重算後速差仍達 ${recalculatedLaneDiffKmh.toFixed(1)} km/h（超過 20 km/h 門檻），正式判定為極端異常分流／單線事故路況！`;
-      extremeExplanation = `系統已鎖定極端路況特徵：雙車道在隧道內部出現顯著速度斷層 (速差 ${recalculatedLaneDiffKmh.toFixed(1)} km/h > 20 km/h)，可能導因於單線慢速故障車、局部施工或突發事故。下方直接展示交通部 API 原始傳輸遙測數據以供即時核對。`;
+      statusText = `極端情況確認：初算兩車道速差 ${initialLaneDiffKmh.toFixed(1)} km/h（超過 23 km/h 觸發門檻），經二次獨立重算後速差仍達 ${recalculatedLaneDiffKmh.toFixed(1)} km/h（仍超過 23 km/h 門檻），系統直接顯示結果，並提取 API 原始傳輸觀測數據！`;
+      extremeExplanation = `系統已鎖定極端路況特徵：雙車道在隧道內部出現顯著速度斷層 (速差 ${recalculatedLaneDiffKmh.toFixed(1)} km/h > 23 km/h)，可能導因於單線慢速故障車、局部施工或突發事故。系統直接展示交通部 API 原始傳輸遙測數據以供即時核對。`;
     } else {
       isExtremeSituation = false;
-      statusText = `二次驗證通過：初算兩車道速差 ${initialLaneDiffKmh.toFixed(1)} km/h，經二次離群抑制重算後速差收斂至 ${recalculatedLaneDiffKmh.toFixed(1)} km/h（未超逾 20 km/h 極端門檻），判定為偶發離散雜訊已校正。`;
-      extremeExplanation = `二次重算成功平滑單一感測器之離群跳動，兩車道速差回落至安全耦合區間 (${recalculatedLaneDiffKmh.toFixed(1)} km/h)。`;
+      statusText = `二次驗證通過：初算兩車道速差 ${initialLaneDiffKmh.toFixed(1)} km/h，經二次離群抑制重算後速差收斂至 ${recalculatedLaneDiffKmh.toFixed(1)} km/h（未超逾 23 km/h 極端門檻），判定為偶發離散雜訊已校正。`;
+      extremeExplanation = `二次重算成功平滑單一感測器之離群跳動，兩車道速差回落至安全耦合區間 (${recalculatedLaneDiffKmh.toFixed(1)} km/h ≤ 23 km/h)。`;
     }
   } else {
     // 未達 23 km/h，常態雙車道流動
@@ -236,11 +243,12 @@ export function executeDoubleVerificationAndRecalculation(
     triggerThresholdKmh: EXTREME_TRIGGER_THRESHOLD_KMH, // 23.0
     initialLaneDiffKmh: parseFloat(initialLaneDiffKmh.toFixed(2)),
     recalculatedLaneDiffKmh: parseFloat(recalculatedLaneDiffKmh.toFixed(2)),
-    recalculatedThresholdKmh: EXTREME_DETERMINED_THRESHOLD_KMH, // 20.0
+    recalculatedThresholdKmh: EXTREME_DETERMINED_THRESHOLD_KMH, // 23.0
     isExtremeSituation,
     verificationMethod: "二次獨立多重空間插值與離群抑制重算法 (Double Robust Cross-Verification)",
     statusText,
     extremeExplanation: extremeExplanation || undefined,
+    recalculatedTrajectories,
     directApiDisplay: {
       receivedTimestamp,
       lane1AvgApiSpeedKmh: parseFloat(lane1AvgApiSpeed.toFixed(1)),

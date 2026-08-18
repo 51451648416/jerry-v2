@@ -375,7 +375,7 @@ export function runVdTrafficEstimator(
     segments: lane2Trajectory.segments,
   };
 
-  // Step 4: Double Verification for Extreme Situations (速差超過 23 km/h 觸發二次重算，重算仍 > 20 km/h 判定為極端情況)
+  // Step 4: Double Verification for Extreme Situations (速差超過 23 km/h 觸發二次重算，重算仍 > 23 km/h 判定為極端情況並直接顯示 API 原始數據)
   const doubleVerification = executeDoubleVerificationAndRecalculation(
     validatedRecords,
     direction,
@@ -383,6 +383,33 @@ export function runVdTrafficEstimator(
     lane2State.equivalentTravelSpeedKmh,
     receivedTimestampStr
   );
+
+  // 重要：二次重算後，數據必須全面替換原本未重算的數據 (Replace original data with recalculated data)
+  if (doubleVerification.triggered && doubleVerification.recalculatedTrajectories) {
+    lane1Trajectory = doubleVerification.recalculatedTrajectories.lane1;
+    lane2Trajectory = doubleVerification.recalculatedTrajectories.lane2;
+    roadTrajectory = doubleVerification.recalculatedTrajectories.road;
+
+    lane1State.travelTimeSec = lane1Trajectory.totalTravelTimeSec;
+    lane1State.travelTimeFormatted = formatSecondsToMinSec(lane1Trajectory.totalTravelTimeSec);
+    lane1State.equivalentTravelSpeedKmh = lane1Trajectory.equivalentTravelSpeedKmh;
+    lane1State.spaceMeanSpeedKmh = lane1Trajectory.equivalentTravelSpeedKmh;
+    lane1State.segments = lane1Trajectory.segments;
+    lane1State.densityVehPerKm =
+      lane1Trajectory.equivalentTravelSpeedKmh > 0
+        ? lane1State.flowVehPerHour / lane1Trajectory.equivalentTravelSpeedKmh
+        : 0;
+
+    lane2State.travelTimeSec = lane2Trajectory.totalTravelTimeSec;
+    lane2State.travelTimeFormatted = formatSecondsToMinSec(lane2Trajectory.totalTravelTimeSec);
+    lane2State.equivalentTravelSpeedKmh = lane2Trajectory.equivalentTravelSpeedKmh;
+    lane2State.spaceMeanSpeedKmh = lane2Trajectory.equivalentTravelSpeedKmh;
+    lane2State.segments = lane2Trajectory.segments;
+    lane2State.densityVehPerKm =
+      lane2Trajectory.equivalentTravelSpeedKmh > 0
+        ? lane2State.flowVehPerHour / lane2Trajectory.equivalentTravelSpeedKmh
+        : 0;
+  }
 
   const diffSec = Math.abs(lane1State.travelTimeSec - lane2State.travelTimeSec);
   const diffRoundedSec = Math.round(diffSec);
@@ -404,11 +431,11 @@ export function runVdTrafficEstimator(
   let safetyNotice = "";
 
   if (doubleVerification.isExtremeSituation) {
-    // 極端情況已由二次重算確認 (>23 km/h 觸發，重算仍 > 20 km/h)
+    // 極端情況已由二次重算確認 (>23 km/h 觸發，重算仍 > 23 km/h)
     const fasterSideLabel = lane1State.travelTimeSec < lane2State.travelTimeSec ? "內側" : "外側";
     fasterLaneId = lane1State.travelTimeSec < lane2State.travelTimeSec ? 1 : 2;
-    comparisonTitle = `【極端異常路況確認】雙車道二次重算速差達 ${doubleVerification.recalculatedLaneDiffKmh.toFixed(1)} km/h（>20 km/h 極端門檻）：${fasterSideLabel} 車道顯著領先！`;
-    safetyNotice = `【極端路況警告】兩車道速差超過 23 km/h 經二次獨立重算後仍達 ${doubleVerification.recalculatedLaneDiffKmh.toFixed(1)} km/h，判定為單線阻滯／局部事故極端路況。請維持安全車距與現場燈號，直接參考下方 API 原始傳輸觀測數據。`;
+    comparisonTitle = `【極端異常路況確認】雙車道二次重算速差達 ${doubleVerification.recalculatedLaneDiffKmh.toFixed(1)} km/h（仍超過 23 km/h 門檻）：${fasterSideLabel} 車道顯著領先！`;
+    safetyNotice = `【極端路況警告】兩車道速差超過 23 km/h 經二次獨立重算後仍達 ${doubleVerification.recalculatedLaneDiffKmh.toFixed(1)} km/h，直接判定為極端路況。請維持安全車距與現場燈號，直接參考下方 API 原始傳輸觀測數據。`;
   } else if (diffRoundedSec < Math.round(trainedSwitchThresholdSec)) {
     // 條件一：若兩車道時間差 ΔT 小於學習切換門檻（ΔT < trainedSwitchThresholdSec）
     // 判定邏輯：差異在容許平衡波動範圍內，兩車道皆可選擇。

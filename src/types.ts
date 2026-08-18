@@ -143,7 +143,7 @@ export interface LaneComparison {
   
   // 極端情況雙重重算驗證機制 (Double Verification for Extreme Lane Divergence)
   doubleVerification?: DoubleVerificationState;
-  isExtremeSituation?: boolean; // 若重算後雙車道速差仍 > 20 km/h，判定為極端異常路況
+  isExtremeSituation?: boolean; // 若重算後雙車道速差仍 > 23 km/h，直接顯示並展示 API 原始數據
 }
 
 export interface ApiDirectVdTelemetry {
@@ -165,11 +165,34 @@ export interface DoubleVerificationState {
   triggerThresholdKmh: number; // 23 km/h 觸發門檻
   initialLaneDiffKmh: number; // 初次計算兩車道速差 (km/h)
   recalculatedLaneDiffKmh: number; // 重算後兩車道速差 (km/h)
-  recalculatedThresholdKmh: number; // 20 km/h 極端判定門檻
-  isExtremeSituation: boolean; // 若重算後仍 > 20 km/h，正式判定為極端情境
+  recalculatedThresholdKmh: number; // 23 km/h 判定門檻
+  isExtremeSituation: boolean; // 若重算後仍 > 23 km/h，直接顯示並判定為極端情境
   verificationMethod: string; // 驗證重算演算法名稱
   statusText: string; // 狀態說明
   extremeExplanation?: string; // 極端情況說明
+  recalculatedTrajectories?: {
+    lane1: {
+      segments: RoadSegmentSlice[];
+      totalTravelTimeSec: number;
+      totalDistanceKm: number;
+      equivalentTravelSpeedKmh: number;
+      methodName: "ALTERNATIVE_ROBUST_FALLBACK";
+    };
+    lane2: {
+      segments: RoadSegmentSlice[];
+      totalTravelTimeSec: number;
+      totalDistanceKm: number;
+      equivalentTravelSpeedKmh: number;
+      methodName: "ALTERNATIVE_ROBUST_FALLBACK";
+    };
+    road: {
+      segments: RoadSegmentSlice[];
+      totalTravelTimeSec: number;
+      totalDistanceKm: number;
+      equivalentTravelSpeedKmh: number;
+      methodName: "ALTERNATIVE_ROBUST_FALLBACK";
+    };
+  };
   directApiDisplay: {
     receivedTimestamp: string;
     lane1AvgApiSpeedKmh: number;
@@ -303,7 +326,7 @@ export interface EstimatedState {
   
   // 極端情況雙重重算驗證機制 (Double Verification for Extreme Lane Divergence)
   doubleVerification?: DoubleVerificationState;
-  isExtremeSituation?: boolean; // 若重算後雙車道速差仍 > 20 km/h，判定為極端異常路況
+  isExtremeSituation?: boolean; // 若重算後雙車道速差仍 > 23 km/h，直接顯示並展示 API 原始數據
   estimationMethod?: "PRIMARY_TRAJECTORY_CALCULUS" | "ALTERNATIVE_ROBUST_FALLBACK";
 
   // RAW vs MODEL Separation & Diagnostic Info
